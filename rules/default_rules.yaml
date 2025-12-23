@@ -1,0 +1,256 @@
+version: 2
+rules:
+  # Watchdog soft lockup indicates a stuck CPU loop.
+  - name: watchdog_soft_lockup
+    severity: CRITICAL
+    category: WATCHDOG
+    pattern: "soft lockup|watchdog timeout"
+    context_boost: 20
+    rationale: "Soft lockup suggests CPU execution stall without full reset."
+    domains: [clock, scheduler]
+    evidence:
+      - failure_class: EXECUTION_STALL
+        weight: 0.6
+        label: "soft lockup"
+      - failure_class: WATCHDOG_RESET
+        weight: 0.4
+        label: "watchdog timeout"
+
+  # Hard lockup usually precedes watchdog reset.
+  - name: watchdog_hard_lockup
+    severity: CRITICAL
+    category: WATCHDOG
+    pattern: "hard lockup|watchdog bark"
+    context_boost: 20
+    rationale: "Hard lockup indicates CPU not responding to scheduler ticks."
+    domains: [clock, scheduler]
+    evidence:
+      - failure_class: WATCHDOG_RESET
+        weight: 0.7
+        label: "hard lockup"
+      - failure_class: EXECUTION_STALL
+        weight: 0.5
+        label: "watchdog bark"
+
+  # RCU stalls often accompany scheduler or IRQ starvation.
+  - name: rcu_stall
+    severity: HIGH
+    category: KERNEL
+    pattern: "RCU stall|rcu_sched detected"
+    context_boost: 10
+    rationale: "RCU stall indicates deferred callbacks blocked by CPU stalls."
+    domains: [clock, scheduler]
+    evidence:
+      - failure_class: EXECUTION_STALL
+        weight: 0.6
+        label: "RCU stall"
+
+  # Hung tasks indicate blocked kernel threads.
+  - name: hung_task
+    severity: HIGH
+    category: KERNEL
+    pattern: "hung_task|blocked for more than"
+    context_boost: 10
+    rationale: "Hung tasks point to blocked kernel resources or deadlocks."
+    domains: [storage, scheduler]
+    evidence:
+      - failure_class: EXECUTION_STALL
+        weight: 0.5
+        label: "hung task"
+
+  # Kernel panic often ties to memory corruption or fatal errors.
+  - name: kernel_panic
+    severity: CRITICAL
+    category: KERNEL
+    pattern: "kernel panic|panic - not syncing"
+    context_boost: 30
+    rationale: "Kernel panic indicates fatal kernel condition or corruption."
+    domains: [ddr, kernel]
+    evidence:
+      - failure_class: MEMORY_CORRUPTION
+        weight: 0.6
+        label: "kernel panic"
+      - failure_class: EXECUTION_STALL
+        weight: 0.4
+        label: "panic - not syncing"
+
+  # Tombstones indicate native crashes.
+  - name: tombstone_fatal_signal
+    severity: HIGH
+    category: TOMBSTONE
+    pattern: "Fatal signal|tombstone|crash_dump"
+    context_boost: 10
+    rationale: "Native crash suggests memory or framework faults."
+    domains: [ddr, framework]
+    evidence:
+      - failure_class: FRAMEWORK_FATAL
+        weight: 0.6
+        label: "fatal signal"
+      - failure_class: MEMORY_CORRUPTION
+        weight: 0.4
+        label: "tombstone"
+
+  # ANR input dispatch indicates UI thread starvation.
+  - name: anr_input_dispatch
+    severity: HIGH
+    category: ANR
+    pattern: "Input dispatching timed out|input dispatch timeout"
+    context_boost: 15
+    rationale: "Input dispatch ANR indicates main thread stalls."
+    domains: [framework, scheduler]
+    evidence:
+      - failure_class: EXECUTION_STALL
+        weight: 0.3
+        label: "input dispatch timeout"
+      - failure_class: FRAMEWORK_FATAL
+        weight: 0.2
+        label: "anr input dispatch"
+
+  # Broadcast ANR.
+  - name: anr_broadcast
+    severity: MEDIUM
+    category: ANR
+    pattern: "Broadcast of Intent .* timed out"
+    context_boost: 10
+    rationale: "Broadcast timeout indicates blocked receivers."
+    domains: [framework]
+    evidence:
+      - failure_class: FRAMEWORK_FATAL
+        weight: 0.3
+        label: "broadcast timeout"
+
+  # Storage timeouts indicate UFS/eMMC issues.
+  - name: storage_timeout
+    severity: HIGH
+    category: STORAGE
+    pattern: "ufs timeout|mmc timeout|I/O error"
+    context_boost: 10
+    rationale: "Storage timeouts indicate stalled IO paths."
+    domains: [storage]
+    evidence:
+      - failure_class: STORAGE_TIMEOUT
+        weight: 0.7
+        label: "storage timeout"
+
+  # Escalating storage resets.
+  - name: storage_reset
+    severity: HIGH
+    category: STORAGE
+    pattern: "ufs reset|mmc reset|resetting .* storage"
+    context_boost: 10
+    rationale: "Storage controller resets signal device instability."
+    domains: [storage]
+    evidence:
+      - failure_class: STORAGE_TIMEOUT
+        weight: 0.6
+        label: "storage reset"
+
+  # Thermal shutdown.
+  - name: thermal_shutdown
+    severity: HIGH
+    category: THERMAL
+    pattern: "thermal.*shutdown|overheat|thermal shutdown"
+    context_boost: 10
+    rationale: "Thermal shutdown indicates overtemperature protection."
+    domains: [thermal, pmic]
+    evidence:
+      - failure_class: THERMAL_SHUTDOWN
+        weight: 0.8
+        label: "thermal shutdown"
+
+  # Reboot reason hints in framework logs.
+  - name: reboot_reason
+    severity: MEDIUM
+    category: POWER
+    pattern: "reboot reason|last reboot|shutdown.*watchdog"
+    context_boost: 5
+    rationale: "Reboot reason strings provide power/reset hints."
+    domains: [pmic, watchdog]
+    evidence:
+      - failure_class: WATCHDOG_RESET
+        weight: 0.4
+        label: "reboot reason"
+      - failure_class: POWER_CUT
+        weight: 0.2
+        label: "shutdown reason"
+
+  # MTK AEE and watchdog signatures.
+  - name: mtk_aee
+    severity: HIGH
+    category: KERNEL
+    pattern: "AEE|aee warn|aee kernel warning"
+    context_boost: 15
+    rationale: "MTK AEE warnings often precede watchdog or panic."
+    domains: [clock, kernel]
+    evidence:
+      - failure_class: EXECUTION_STALL
+        weight: 0.5
+        label: "MTK AEE"
+      - failure_class: WATCHDOG_RESET
+        weight: 0.4
+        label: "aee warning"
+
+  # Samsung watchdog variants.
+  - name: samsung_watchdog
+    severity: CRITICAL
+    category: WATCHDOG
+    pattern: "sec_wdt|sec_wdt_reset|wdt reset"
+    context_boost: 15
+    rationale: "Samsung watchdog logs indicate watchdog reset."
+    domains: [clock, pmic]
+    evidence:
+      - failure_class: WATCHDOG_RESET
+        weight: 0.7
+        label: "sec_wdt"
+
+  # DDR / memory corruption signals.
+  - name: ddr_error
+    severity: CRITICAL
+    category: MEMORY
+    pattern: "DDR error|bus error|ECC error|memory corruption"
+    context_boost: 20
+    rationale: "DDR/ecc errors indicate memory corruption."
+    domains: [ddr]
+    evidence:
+      - failure_class: MEMORY_CORRUPTION
+        weight: 0.8
+        label: "DDR error"
+
+  # Clock or scheduler stall indicators.
+  - name: clock_stall
+    severity: HIGH
+    category: KERNEL
+    pattern: "clocksource.*unstable|sched clock unstable|timer.*delay"
+    context_boost: 10
+    rationale: "Clock instability can trigger stalls or watchdog resets."
+    domains: [clock]
+    evidence:
+      - failure_class: EXECUTION_STALL
+        weight: 0.5
+        label: "clock unstable"
+
+  # Scheduler stall warnings.
+  - name: scheduler_stall
+    severity: HIGH
+    category: KERNEL
+    pattern: "sched: RT throttling activated|sched: WARNING|rcu_preempt detected stalls"
+    context_boost: 10
+    rationale: "Scheduler stalls indicate CPU starvation or runaway tasks."
+    domains: [scheduler]
+    evidence:
+      - failure_class: EXECUTION_STALL
+        weight: 0.5
+        label: "scheduler stall"
+
+  # PMIC / power loss hints.
+  - name: pmic_power_loss
+    severity: HIGH
+    category: POWER
+    pattern: "PMIC reset|power loss|brownout"
+    context_boost: 10
+    rationale: "PMIC resets suggest power instability or cut."
+    domains: [pmic]
+    evidence:
+      - failure_class: POWER_CUT
+        weight: 0.7
+        label: "pmic reset"

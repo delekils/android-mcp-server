@@ -1,215 +1,188 @@
-# Android MCP Server
+# BadLog
 
-An MCP (Model Context Protocol) server that provides programmatic control over
-Android devices through ADB (Android Debug Bridge). This server exposes
-various Android device management capabilities that can be accessed by MCP
-clients like [Claude desktop](https://modelcontextprotocol.io/quickstart/user)
-and Code editors
-(e.g. [Cursor](https://docs.cursor.com/context/model-context-protocol))
+BadLog is a Windows-first CLI for capturing **only** high-signal Android
+anomalies ("bad stuff") from ADB logcat streams. It continuously monitors logs,
+keeps a ring buffer for context, and emits **incident-centric** summaries with
+classification, confidence scoring, and artifacts.
 
-## Features
+## Highlights
 
-- 🔧 ADB Command Execution
-- 📸 Device Screenshot Capture
-- 🎯 UI Layout Analysis
-- 📱 Device Package Management
+- Android 8–16 compatible via **feature detection** (no version hardcoding)
+- No Android Studio required; only ADB in PATH
+- Works without root, uses root only if available
+- Survives disconnects/reboots and captures best-effort artifacts
+- Incident-centric JSONL + text logs, optional HTML report
 
-## Prerequisites
+## Windows Installation
 
-- Python 3.x
-- ADB (Android Debug Bridge) installed and configured
-- Android device or emulator (not tested)
-
-## Installation
-
-1. Clone the repository:
+1. Install Python 3.11+.
+2. Install ADB (Android platform-tools) and ensure `adb` is in `PATH`.
+3. Install BadLog:
 
 ```bash
-git clone https://github.com/minhalvp/android-mcp-server.git
-cd android-mcp-server
+pip install -e .
 ```
 
-2. Install dependencies:
-This project uses [uv](https://github.com/astral-sh/uv) for project
-management via various methods of
-[installation](https://docs.astral.sh/uv/getting-started/installation/).
+## Quick Start
 
 ```bash
-uv python install 3.11
-uv sync
+badlog devices
+badlog run --output C:\badlog\out
 ```
 
-## Configuration
+### Configuration
 
-The server supports flexible device configuration with multiple usage scenarios.
-
-### Device Selection Modes
-
-**1. Automatic Selection (Recommended for single device)**
-
-- No configuration file needed
-- Automatically connects to the only connected device
-- Perfect for development with a single test device
-
-**2. Manual Device Selection**
-
-- Use when you have multiple devices connected
-- Specify exact device in configuration file
-
-### Configuration File (Optional)
-
-The configuration file (`config.yaml`) is **optional**. If not present, the server will automatically select the device if only one is connected.
-
-#### For Automatic Selection
-
-Simply ensure only one device is connected and run the server - no configuration needed!
-
-#### For Manual Selection
-
-1. Create a configuration file:
-
-```bash
-cp config.yaml.example config.yaml
-```
-
-2. Edit `config.yaml` and specify your device:
+BadLog accepts a YAML or JSON config file:
 
 ```yaml
-device:
-  name: "your-device-serial-here" # Device identifier from 'adb devices'
+output:
+  directory: ./badlog-output
+  emit_html: false
+capture:
+  device_serial:
+  buffers: [all]
+  format: threadtime
+  ring_size: 400
+  pre_context: 40
+  post_context: 60
+  incident_window_seconds: 30
+suppression:
+  drop_chatty: true
+  drop_tags: []
+  rate_limit_per_minute: 0
+rules:
+  files: []
+verbosity: 0
 ```
 
-**For auto-selection**, you can use any of these methods:
-
-```yaml
-device:
-  name: null              # Explicit null (recommended)
-  # name: ""              # Empty string  
-  # name:                 # Or leave empty/comment out
-```
-
-### Finding Your Device Serial
-
-To find your device identifier, run:
+Run with:
 
 ```bash
-adb devices
+badlog run --config badlog.yaml
 ```
 
-Example output:
+## Supported Android Versions
 
+BadLog supports Android 8–16 (API 26–36). It detects capabilities at runtime:
+
+- Detects readable logcat buffers (`main`, `system`, `crash`, `kernel`, etc.)
+- Attempts `dmesg`, pstore, and dropbox on reconnect
+- Reports missing/denied artifacts cleanly
+
+## Failure Classes & Confidence
+
+BadLog aggregates evidence into failure classes:
+
+- **EXECUTION_STALL**: CPU stalls, scheduler/RCU lockups, hung tasks
+- **WATCHDOG_RESET**: watchdog bite/bark, WDT resets
+- **MEMORY_CORRUPTION**: DDR/ECC errors, panics tied to corruption
+- **POWER_CUT**: PMIC resets, brownouts, power loss
+- **THERMAL_SHUTDOWN**: thermal protection/overheat shutdowns
+- **STORAGE_TIMEOUT**: UFS/eMMC timeouts, resets
+- **FRAMEWORK_FATAL**: ANRs, tombstones, framework fatal errors
+
+Confidence is deterministic: weighted evidence from logcat rules,
+reconnect artifacts (dmesg/pstore/dropbox), and reset-reason normalization are
+combined, then normalized by total evidence weight.
+
+### EXECUTION_STALL vs POWER_CUT
+
+- **EXECUTION_STALL** typically includes soft/hard lockups, RCU stalls,
+  or hung-task indicators and aligns with watchdog resets.
+- **POWER_CUT** is used when reset reasons or artifacts point to PMIC reset,
+  brownout, or power loss without clear pre-crash kernel stall signatures.
+
+## Rule Authoring
+
+Rules are regex-based with metadata and evidence weights. Example:
+
+```yaml
+version: 2
+rules:
+  - name: watchdog_soft_lockup
+    severity: CRITICAL
+    category: WATCHDOG
+    pattern: "soft lockup|watchdog timeout"
+    context_boost: 20
+    rationale: "Soft lockup suggests CPU execution stall without full reset."
+    domains: [clock, scheduler]
+    evidence:
+      - failure_class: EXECUTION_STALL
+        weight: 0.6
+        label: "soft lockup"
 ```
-List of devices attached
-13b22d7f        device
-emulator-5554   device
+
+Custom rules merge with defaults by name. Use:
+
+```bash
+badlog test-rules rules/custom.yaml
 ```
 
-Use the first column value (e.g., `13b22d7f` or `emulator-5554`) as the device name.
+## Output (Incident-Centric)
 
-### Usage Scenarios
+- `incidents.jsonl`: machine-readable incident records
+- `incidents.log`: human-readable incident summaries
+- `report.html`: optional summary report
+- `incidents/`: reconnect artifacts (dmesg, pstore, reset hints)
 
-| Scenario | Configuration Required | Behavior |
-|----------|----------------------|----------|
-| Single device connected | None | ✅ Auto-connects to the device |
-| Multiple devices, want specific one | `config.yaml` with `device.name` | ✅ Connects to specified device |
-| Multiple devices, no config | None | ❌ Shows error with available devices |
-| No devices connected | N/A | ❌ Shows "no devices" error |
+Incident records include:
 
-**Note**: If you have multiple devices connected and don't specify which one to use, the server will show an error message listing all available devices.
+- `incident_id`, `start_time_utc`, `end_time_utc`
+- `failure_class`, `confidence`, `evidence`
+- `reset_reason` (WATCHDOG, KERNEL_PANIC, POWER_LOSS, THERMAL, UNKNOWN)
+- `timeline` (T-5s ... T+6s)
+- full event list with context
 
-## Usage
+## Reset Reason Normalization (Vendor Notes)
 
-An MCP client is needed to use this server. The Claude Desktop app is an example
-of an MCP client. To use this server with Claude Desktop:
+BadLog normalizes reset hints into a canonical enum:
 
-1. Locate your Claude Desktop configuration file:
+- `WATCHDOG`, `KERNEL_PANIC`, `POWER_LOSS`, `THERMAL`, `UNKNOWN`
 
-   - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
-   - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+Vendor differences handled by pattern-based normalization:
 
-2. Add the Android MCP server configuration to the `mcpServers` section:
+- **Samsung**: `ro.boot.bootreason`, `sec_wdt`, `sec_wdt_reset` often map to `WATCHDOG`.
+- **MTK**: AEE logs, `aee` warnings, and MTK-specific reset strings map to watchdog or kernel stall classes.
+- **Generic**: `panic`, `kernel panic`, `thermal`, `brownout`, or `power loss` map to their respective classes.
+
+## Commands
+
+- `badlog run`
+- `badlog devices`
+- `badlog test-rules <file>`
+- `badlog report <out_dir>`
+- `badlog incidents <out_dir>`
+- `badlog explain <out_dir> <incident_id>`
+- `badlog doctor --device <serial>`
+
+## Worked Example (freeze → watchdog reboot)
+
+1. Start capture:
+   ```bash
+   badlog run --output C:\badlog\out
+   ```
+2. A freeze occurs and the device reboots.
+3. BadLog emits an incident:
 
 ```json
 {
-  "mcpServers": {
-    "android": {
-      "command": "path/to/uv",
-      "args": ["--directory", "path/to/android-mcp-server", "run", "server.py"]
-    }
-  }
+  "incident_id": "20240210T114530Z",
+  "failure_class": "WATCHDOG_RESET",
+  "confidence": 0.82,
+  "evidence": ["soft lockup", "RCU stall", "reset_reason=WATCHDOG"],
+  "reset_reason": "WATCHDOG"
 }
 ```
 
-Replace:
+The timeline clarifies order:
 
-- `path/to/uv` with the actual path to your `uv` executable
-- `path/to/android-mcp-server` with the absolute path to where you cloned this
-repository
-
-<https://github.com/user-attachments/assets/c45bbc17-f698-43e7-85b4-f1b39b8326a8>
-
-### Available Tools
-
-The server exposes the following tools:
-
-```python
-def get_packages() -> str:
-    """
-    Get all installed packages on the device.
-    Returns:
-        str: A list of all installed packages on the device as a string
-    """
+```
+T-5s  rcu_stall
+T-2s  watchdog_soft_lockup
+T+0s  reboot
+T+6s  dmesg: watchdog bite
 ```
 
-```python
-def execute_adb_command(command: str) -> str:
-    """
-    Executes an ADB command and returns the output.
-    Args:
-        command (str): The ADB command to execute
-    Returns:
-        str: The output of the ADB command
-    """
-```
+## Security Note
 
-```python
-def get_uilayout() -> str:
-    """
-    Retrieves information about clickable elements in the current UI.
-    Returns a formatted string containing details about each clickable element,
-    including their text, content description, bounds, and center coordinates.
-
-    Returns:
-        str: A formatted list of clickable elements with their properties
-    """
-```
-
-```python
-def get_screenshot() -> Image:
-    """
-    Takes a screenshot of the device and returns it.
-    Returns:
-        Image: the screenshot
-    """
-```
-
-```python
-def get_package_action_intents(package_name: str) -> list[str]:
-    """
-    Get all non-data actions from Activity Resolver Table for a package
-    Args:
-        package_name (str): The name of the package to get actions for
-    Returns:
-        list[str]: A list of all non-data actions from the Activity Resolver
-        Table for the package
-    """
-```
-
-## Contributing
-
-Contributions are welcome!
-
-## Acknowledgments
-
-- Built with
-[Model Context Protocol (MCP)](https://modelcontextprotocol.io/introduction)
+Logs may contain PII. Consider redaction if sharing output with third parties.
