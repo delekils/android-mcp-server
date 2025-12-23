@@ -1,0 +1,55 @@
+- name: watchdog_soft_lockup
+  severity: CRITICAL
+  category: WATCHDOG
+  pattern: "soft lockup|watchdog timeout"
+  context_boost: 20
+- name: watchdog_hard_lockup
+  severity: CRITICAL
+  category: WATCHDOG
+  pattern: "hard lockup|watchdog bark"
+  context_boost: 20
+- name: rcu_stall
+  severity: HIGH
+  category: KERNEL
+  pattern: "RCU stall|rcu_sched detected"
+  context_boost: 10
+- name: hung_task
+  severity: HIGH
+  category: KERNEL
+  pattern: "hung_task|blocked for more than"
+  context_boost: 10
+- name: kernel_panic
+  severity: CRITICAL
+  category: KERNEL
+  pattern: "kernel panic|panic - not syncing"
+  context_boost: 30
+- name: tombstone_fatal_signal
+  severity: HIGH
+  category: TOMBSTONE
+  pattern: "Fatal signal|tombstone|crash_dump"
+  context_boost: 10
+- name: anr_input_dispatch
+  severity: HIGH
+  category: ANR
+  pattern: "Input dispatching timed out|input dispatch timeout"
+  context_boost: 15
+- name: anr_broadcast
+  severity: MEDIUM
+  category: ANR
+  pattern: "Broadcast of Intent .* timed out"
+  context_boost: 10
+- name: storage_timeout
+  severity: HIGH
+  category: STORAGE
+  pattern: "ufs timeout|mmc timeout|I/O error"
+  context_boost: 10
+- name: thermal_shutdown
+  severity: HIGH
+  category: THERMAL
+  pattern: "thermal.*shutdown|overheat|thermal shutdown"
+  context_boost: 10
+- name: reboot_reason
+  severity: MEDIUM
+  category: POWER
+  pattern: "reboot reason|last reboot|shutdown.*watchdog"
+  context_boost: 5

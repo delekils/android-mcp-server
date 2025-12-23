@@ -1,0 +1,5 @@
+{
+  "rule_name": "watchdog_soft_lockup",
+  "severity": "CRITICAL",
+  "category": "WATCHDOG"
+}
